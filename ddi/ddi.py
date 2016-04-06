@@ -4,6 +4,7 @@ from inspect import getfullargspec, signature
 from functools import wraps, partial
 from itertools import islice
 import fnmatch
+import random
 
 def NoAssertion(obj): return True
 
@@ -75,7 +76,7 @@ class Demander:
 sep = '/'
 
 def anonymous(feature):
-    return feature[-1] == sep
+    return (feature[-1] == sep) or (not feature)
 
 class DemandedFeature:
     
@@ -141,23 +142,28 @@ class DependencyContainer:
 
     def inst_demander(self, demander):
         args, kwargs = update_args(demander.provider, demander.args, demander.kwargs, {k:v for k, (_, v) in demander.satisfied.items()})
-        args, kwargs = all2kwargs(demander.provider, args, kwargs)
-        kwargs = self.update_params_with_conf(demander.inst_feature, kwargs)
-        
+
+        if demander.inst_feature:
+            args, kwargs = all2kwargs(demander.provider, args, kwargs)
+            demander_inst_feature = demander.inst_feature
+            
+            if anonymous(demander_inst_feature):
+                demander_inst_feature += str(random.randint(0, 1e8))
+    
+    #         kwargs = self.update_params_with_conf(demander.inst_feature, kwargs)
+    #         args, params = all2kwargs(cls.__init__, args, kwargs, ignore_args_cnt=1)
+            
+            kwargs = ddic.update_params_with_conf(demander_inst_feature, kwargs)
+
         demander_inst = demander.provider(*args, **kwargs)
         if demander.inst_feature:
-            
             try:
-                demander_inst_feature = demander.inst_feature
-                if anonymous(demander_inst_feature):
-                    demander_inst_feature += str(id(demander_inst))
-                    
                 for _, (feature, _) in demander.satisfied.items():
                     self._provided_metadata[feature]['deps'].append(demander_inst_feature)
             except KeyError:
                 return None
 
-            demander_inst_feature = self.provide(demander.inst_feature, demander_inst)
+            self.provide(demander_inst_feature, demander_inst)
 
             return demander_inst_feature
         else:
@@ -272,12 +278,15 @@ class DependencyContainer:
             demander.demanded_feature.append(df)
             
         self.demanders.append(demander)
-       
+        
+        ret = [None, None]
         if provider_supplied and feature_supplied:
-            self.provide(feature, provider)
+            ret[0] = self.provide(feature, provider)
 
         if demander.all_satisfied():
-            self.inst_demander(demander)
+            ret[1] = self.inst_demander(demander)
+            
+        return tuple(ret)
         
     def unprovide_by_name(self, feature):
         if feature in self._provided_metadata:
@@ -378,6 +387,9 @@ def diinit(func):
 def all2kwargs(func, args, kwargs, ignore_args_cnt=0):
     arg_names, varargs, varkw, defaults, kwonlyargs, kwonlydefaults, annotations = (
         inspect.getfullargspec(func))
+    
+    if inspect.isclass(func):
+        arg_names = arg_names[1:]
 
     params = kwargs
     
@@ -396,24 +408,24 @@ def all2kwargs(func, args, kwargs, ignore_args_cnt=0):
 
     return args, params
 
-def compinit(func):
-    @diinit
-    @lwraps(func)
-    def wrapper(self, name, parent, *args, **kwargs):
-        if parent is None:
-            qname = name
-        else:
-            qname = sep.join([parent.qname, name])
-                    
-        args, params = all2kwargs(func, args, kwargs, ignore_args_cnt=3)
-        
-        params = ddic.update_params_with_conf(qname, params)
-        
-        self.name = name
-        self.qname = qname
-        func(self, name, parent, *args, **params)
-        
-        ddic.provide(qname, self)        
+# def compinit(func):
+#     @diinit
+#     @lwraps(func)
+#     def wrapper(self, name, parent, *args, **kwargs):
+#         if parent is None:
+#             qname = name
+#         else:
+#             qname = sep.join([parent.qname, name])
+#                     
+#         args, params = all2kwargs(func, args, kwargs, ignore_args_cnt=3)
+#         
+#         params = ddic.update_params_with_conf(qname, params)
+#         
+#         self.name = name
+#         self.qname = qname
+#         func(self, name, parent, *args, **params)
+#         
+#         ddic.provide(qname, self)        
         
 #     def wrapper(self, name=None, parent=None, *args, **kwargs):
 #         
