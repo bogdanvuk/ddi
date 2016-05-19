@@ -76,7 +76,7 @@ class Demander:
 sep = '/'
 
 def anonymous(feature):
-    return (feature[-1] == sep) or (not feature)
+    return (not feature) or (feature[-1] == sep)
 
 class DemandedFeature:
     
@@ -101,17 +101,9 @@ class DependencyContainer:
     
     def __init__(self, allowReplace=False, providers_cls = dict):
         super().__init__()
-        self.providers = providers_cls()
-        self.configuration = []
-        self._provided_metadata = {}
-        self.demander_cnt = 0
-        self._provide_candidates = []
-        self._provided = []
-        self._inst_level = 0
-        self.demanders = []
+        self.providers_cls = providers_cls
         self.allowReplace = allowReplace
-        self.demanded_features = {}
-        self.provided_last = {}
+        self.clear()
 
     def __iter__(self):
         return self.providers.__iter__()
@@ -123,6 +115,18 @@ class DependencyContainer:
     def filter(self, pat):
         for f in fnmatch.filter(self.providers.keys(), pat):
             yield f, self.providers[f]
+
+    def clear(self):
+        self.providers = self.providers_cls()
+        self.configuration = []
+        self._provided_metadata = {}
+        self.demander_cnt = 0
+        self._provide_candidates = []
+        self._provided = []
+        self._inst_level = 0
+        self.demanders = []
+        self.demanded_features = {}
+        self.provided_last = {}
 
     def __setitem__(self, feature, provider):
         self.provide(feature, provider)
@@ -202,6 +206,7 @@ class DependencyContainer:
         
         for pattern, df_list in self.demanded_features.items():
             if fnmatch.fnmatch(feature_ext, pattern):
+                self.provided_last[pattern] = feature_ext
                 for df in df_list:
                     self._provide_candidates[-1].add(df)
                     df.proposed = (feature_ext, provider)
@@ -219,14 +224,12 @@ class DependencyContainer:
             self._provide_candidates[-1].remove(pc)
             self.inst_demander(pc.demander)
             
+            
 
         pc = True
         while pc is not None:
             for pc in sorted(self._provide_candidates[-1], key=lambda x: x.demander.id, reverse=True ):            
                 if not pc.dependency.amendment:
-
-                    if pc.demander.feature == 'cls/content_assist':
-                        pass
                     if pc.provided(pc.proposed[0], pc.proposed[1]):
                         if pc.demander.all_satisfied():
                             break
@@ -257,6 +260,8 @@ class DependencyContainer:
             
         demander = Demander(provider, inst_feature, list(inst_args), dict(inst_kwargs), deps, mask=list(mask), feature=feature)
         for name, d in demander.dependencies.items():
+            already_provided = None
+            
             if d.feature not in self.demanded_features:
                 self.demanded_features[d.feature] = []
                 
@@ -265,11 +270,12 @@ class DependencyContainer:
                         self.provided_last[d.feature] = f_name
                         already_provided = f_name
                         break
-                else:
-                    self.provided_last[d.feature] = None
-                    already_provided = None
+                #else:
+#                    self.provided_last[d.feature] = None
+                    
             else:
-                already_provided = self.provided_last[d.feature]
+                if d.feature in self.provided_last:
+                    already_provided = self.provided_last[d.feature]
             
             df = DemandedFeature(demander, name, d, already_provided)
             demander.id = self.demander_cnt
@@ -308,11 +314,16 @@ class DependencyContainer:
         
         self.unprovide_by_name(feature)
         
-    def search(self, pat, assertion=NoAssertion):
-        for f,p in self.providers.items():
-            if fnmatch.fnmatch(f, pat):
-                if assertion(p):
-                    yield f 
+#     def search(self, pat, assertion=NoAssertion):
+#         for f,p in self.providers.items():
+#             if fnmatch.fnmatch(f, pat):
+#                 if assertion(p):
+#                     yield f 
+                    
+    def search(self, pat='*', assertion=NoAssertion, depth=0):
+        for f in fnmatch.filter(self.providers, pat):
+            if assertion(self.providers[f]):
+                yield f
 
 ddic = DependencyContainer(allowReplace=True)
 
